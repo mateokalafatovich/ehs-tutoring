@@ -2,7 +2,7 @@ from tokenize import TokenError
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth.hashers import check_password
-from models import *
+from .models import *
 from django.contrib.auth import authenticate
 from django.utils.encoding import smart_str, force_bytes, DjangoUnicodeDecodeError
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode

@@ -2,7 +2,7 @@ from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.mail import send_mail, EmailMessage
 import random
-from models import User
+from .models import User
 
 def send_otp_email(email):
     try:

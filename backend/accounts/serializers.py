@@ -1,8 +1,9 @@
-from tokenize import TokenError
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth.hashers import check_password
 from .models import *
+from .emails import Util
 from django.contrib.auth import authenticate
 from django.utils.encoding import smart_str, force_bytes, DjangoUnicodeDecodeError
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
@@ -28,13 +29,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         return attrs
     
     def create(self, validated_data):
-        user = User.objects.create_user(
-            username=validated_data['username'],
-            email=validated_data['email'],
-            password=validated_data['password'],
-            password2=validated_data['password2'],
-            role=validated_data['role']
-        )
+        user = User.objects.create_user(**validated_data)
         return user
     
 class VerifyEmailSerializer(serializers.Serializer):
@@ -45,6 +40,10 @@ class VerifyEmailSerializer(serializers.Serializer):
 class UserLoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
+    
+    class Meta:
+        model = User
+        fields = ['email', 'password']
     
     def validate(self, attrs):
         email = attrs.get('email')
@@ -58,27 +57,30 @@ class UserLoginSerializer(serializers.Serializer):
         
         if not user:
             raise serializers.ValidationError({"status": "error", "message": "Email or password doesn't match. Please try again."})
-        
+    
         if not user.is_verified:
-            raise serializers.ValidationError({"status": "error", "message": "Account not verified."})
-
+            raise serializers.ValidationError({"status": "error", "message": "Email is not verified. Please check your email for the OTP."})
+        
         return attrs
 
 class UserProfileSerializer(serializers.ModelSerializer):
-    user = serializers.SerializerMethodField()
     class Meta:
         model = User
-        fields = ['id', 
-            'username', 
+        fields = [
+            'id',
             'email', 
             'role'
         ]
      
 class UserChangePasswordSerializer(serializers.Serializer):
-    old_password = serializers.CharField(required=True)
-    new_password = serializers.CharField(required=True)
-    new_password2 = serializers.CharField(required=True)
+    old_password = serializers.CharField(max_length=255, style={'input_type': 'password'}, write_only=True)
+    new_password = serializers.CharField(max_length=255, style={'input_type': 'password'}, write_only=True)
+    new_password2 = serializers.CharField(max_length=255, style={'input_type': 'password'}, write_only=True)
 
+    class Meta:
+        model = User
+        fields = ['old_password', 'new_password', 'new_password2']
+        
     def validate(self, attrs):
         user = self.context.get('user')
         old_password = attrs.get('old_password')
@@ -120,7 +122,11 @@ class SendPasswordResetEmailSerializer(serializers.Serializer):
             # Here you would typically send the email with the reset link containing uidb64 and token
             link = f"http://localhost:8000/api/accounts/reset-password/{uidb64}/{token}/"
             body = f"Hi {user.username},\nUse the link below to reset your password:\n{link}"
-            # send_email(subject="Reset your password", body=body, to=[user.email])
+            Util.send_email({
+                'email_subject': 'Reset your password',
+                'email_body': body,
+                'to_email': user.email,
+            })
             return attrs
 
 class UserPasswordResetSerializer(serializers.Serializer):
@@ -158,11 +164,11 @@ class UserLogoutSerializer(serializers.Serializer):
     refresh = serializers.CharField()
 
     def validate(self, attrs):
-        self.token = attrs['refresh']
+        self.token = attrs.get('refresh')
         return attrs
 
     def save(self, **kwargs):
         try:
             RefreshToken(self.token).blacklist()
         except TokenError:
-            raise serializers.ValidationError({"refresh": "Token is invalid or expired."})
+            raise serializers.ValidationError({"refresh": "Invalid or expired token."})

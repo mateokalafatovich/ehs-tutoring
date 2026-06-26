@@ -2,7 +2,7 @@ from django.shortcuts import render
 
 # Create your views here.
 from django.db.migrations import serializer
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.renderers import JSONRenderer
 from rest_framework.response import Response
 from rest_framework import status
@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 from django.contrib.auth import update_session_auth_hash
 from rest_framework_simplejwt.tokens import RefreshToken, OutstandingToken
 from .serializers import *
-from . emails import *
+from .emails import send_otp_email
 from django.contrib.auth import authenticate
 from django.core.exceptions import ObjectDoesNotExist
 
@@ -22,12 +22,15 @@ def get_token_for_user(user):
     }
 
 class UserRegistrationView(APIView):
+    permission_classes = [AllowAny]
     serializer_class = UserRegistrationSerializer
     
-    def post(self, request, *args, **kwargs):
+    def post(self, request):
         serializer = UserRegistrationSerializer(data=request.data)
         if serializer.is_valid():
             user = serializer.save()
+            user.is_active = False  # Deactivate account until it is verified
+            user.save(updated_fields=['is_active'])
             send_otp_email(user.email, user.otp)
             email = serializer.validated_data['email']
             if User.objects.filter(email=email).exists():
@@ -35,6 +38,8 @@ class UserRegistrationView(APIView):
         return Response({"status": "error", "message": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)  
 
 class VerifyEmailView(APIView):
+    permission_classes = [AllowAny]
+    
     def post(self, request):
         serializer = VerifyEmailSerializer(data=request.data)
         if serializer.is_valid():
@@ -54,6 +59,7 @@ class VerifyEmailView(APIView):
         return Response({"status": "error", "message": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
     
 class UserLoginView(APIView):
+    permission_classes = [AllowAny]
     serializer_class = UserLoginSerializer
 
     def post(self, request):
@@ -96,6 +102,7 @@ class UserChangePasswordView(APIView):
         return Response({"status": "error", "message": "Password reset failed. Please try again later."}, status=status.HTTP_400_BAD_REQUEST)
     
 class SendPasswordResetEmailView(APIView):
+    permission_classes = [AllowAny]
     serializer_class = SendPasswordResetEmailSerializer
     
     def post(self, request):
@@ -106,9 +113,10 @@ class SendPasswordResetEmailView(APIView):
     
 class UserPasswordResetView(APIView):
     serializer_class = UserPasswordResetSerializer
+    permission_classes = [AllowAny]
     
     def post(self, request, uid, token, *args, **kwargs):
-        serializer = UserPasswordResetSerializer(data=request.data, context={'uid': uid, 'token': token})
+        serializer = UserPasswordResetSerializer(data=request.data, context={'uidb64': uid, 'token': token})
         if serializer.is_valid():
             return Response({"status": "success", "message": "Password has been reset successfully."}, status=status.HTTP_200_OK)
         return Response({"status": "error", "message": serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
@@ -120,5 +128,6 @@ class UserLogoutView(APIView):
     def post(self, request):
         serializer = UserLogoutSerializer(data=request.data)
         if serializer.is_valid(raise_exception=True):
+            serializer.save()
             return Response({"status": "success", "message": "Logout successful."}, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
